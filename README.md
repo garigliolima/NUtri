@@ -76,9 +76,11 @@ O PDF gerado pelo bot usa arte geométrica abstrata no cabeçalho (arcos de ener
 
 | Comando | Descrição |
 |---------|-----------|
-| `/start` | Apresenta o bot e lista funcionalidades |
-| `/plano` | Inicia coleta de dados para gerar o plano em PDF |
-| `/reset` | Apaga o histórico e reinicia a conversa |
+| `/start` | Apresenta o bot — reconhece usuários que voltam pelo nome e objetivo |
+| `/plano` | Gera o plano nutricional personalizado em PDF |
+| `/perfil` | Exibe os dados que o bot já tem sobre o usuário |
+| `/reset` | Apaga o histórico de conversa (mantém o perfil) |
+| `/stats` | Estatísticas de uso — total de usuários, mensagens e planos gerados *(oculto, só para o dono)* |
 
 Além dos comandos, o bot responde qualquer mensagem de texto e analisa fotos de pratos enviadas diretamente na conversa.
 
@@ -89,6 +91,7 @@ Além dos comandos, o bot responde qualquer mensagem de texto e analisa fotos de
 ```
 nuutri-bot/
 ├── bot.py                          # Lógica principal do Telegram bot
+├── database.py                     # Camada SQLite — usuários, histórico, planos, rate limit
 ├── pdf_generator.py                # Gerador de PDF com identidade NUUtri
 ├── BricolageGrotesque-Regular.ttf  # Fonte — títulos
 ├── BricolageGrotesque-Bold.ttf
@@ -101,14 +104,18 @@ nuutri-bot/
 └── README.md
 ```
 
+O arquivo `nuutri.db` é criado automaticamente na primeira execução no mesmo diretório.
+
 ---
 
 ## Variáveis de Ambiente
 
-| Variável | Descrição |
-|----------|-----------|
-| `TELEGRAM_TOKEN` | Token gerado pelo BotFather |
-| `ANTHROPIC_API_KEY` | Chave da API Anthropic (claude-opus-4-5) |
+| Variável | Obrigatória | Padrão | Descrição |
+|----------|-------------|--------|-----------|
+| `TELEGRAM_TOKEN` | ✅ | — | Token gerado pelo BotFather |
+| `ANTHROPIC_API_KEY` | ✅ | — | Chave da API Anthropic |
+| `RATE_LIMIT_PER_HOUR` | ❌ | `40` | Máximo de mensagens por usuário por hora |
+| `DB_PATH` | ❌ | `nuutri.db` | Caminho do arquivo SQLite |
 
 ---
 
@@ -116,8 +123,9 @@ nuutri-bot/
 
 **Conversação:**
 - Responde dúvidas sobre dieta, macros, suplementação e estratégias de treino
-- Mantém histórico de conversa por usuário (até 30 mensagens)
-- Coleta dados do usuário de forma natural ao longo da conversa
+- Histórico de conversa persistido em SQLite (sobrevive a reinicializações)
+- Perfil do usuário salvo automaticamente — o bot lembra peso, objetivo e dados entre sessões
+- Rate limiting configurável para controle de custos de API
 
 **Análise de imagens:**
 - Recebe fotos de pratos e estima calorias, proteínas, carboidratos e gorduras
@@ -126,9 +134,12 @@ nuutri-bot/
 
 **Plano nutricional em PDF:**
 - Acionado por `/plano` ou mensagem solicitando um plano
-- Coleta: nome, peso, altura, idade, sexo, objetivo e nível de atividade
+- Reutiliza dados do perfil salvo — não pergunta de novo o que já sabe
 - Gera PDF com identidade visual NUUtri (arte geométrica, fontes customizadas, cards de macro, blocos de refeição)
-- Envia o arquivo `.pdf` diretamente no chat com resumo dos macros
+- Envia o arquivo `.pdf` diretamente no chat e salva o plano no banco para histórico
+
+**Analytics:**
+- `/stats` exibe total de usuários, mensagens trocadas, planos gerados e objetivos mais comuns
 
 ---
 
@@ -138,6 +149,7 @@ nuutri-bot/
 |------------|------------|
 | Bot Telegram | `python-telegram-bot 21.6` |
 | IA | `Anthropic Claude claude-opus-4-5` |
+| Banco de dados | `SQLite` (nativo Python — sem dependência extra) |
 | Geração de PDF | `ReportLab 4.2.5` |
 | Tipografia | BricolageGrotesque · Outfit · InstrumentSans |
 | Hospedagem | Railway / Render (background worker) |
@@ -146,6 +158,6 @@ nuutri-bot/
 
 ## Notas
 
-- O histórico de conversa fica **em memória** — reseta se o servidor reiniciar. Para persistência, adicione Redis ou SQLite.
 - As fontes TTF precisam estar na **mesma pasta** que o `pdf_generator.py` para serem carregadas corretamente.
 - O modelo usado é `claude-opus-4-5`. Para reduzir custos, substitua por `claude-haiku-4-5-20251001` no `bot.py`.
+- No Railway, o sistema de arquivos é **efêmero** — o `nuutri.db` pode ser perdido em redeploys. Para produção com persistência garantida, defina `DB_PATH` apontando para um volume persistente ou migre para PostgreSQL.
