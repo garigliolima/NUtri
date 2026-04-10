@@ -5,7 +5,7 @@ from datetime import datetime
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from reportlab.lib.units import mm
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, KeepTogether, HRFlowable
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, KeepTogether, HRFlowable, PageBreak
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
 from reportlab.platypus import Flowable
@@ -266,6 +266,99 @@ def _s():
     }
 
 
+def _weekly_overview_table(dias: list, page_width: float) -> Table:
+    """Tabela resumo da semana — proteína principal do almoço/jantar de cada dia."""
+    DAYS_SHORT = ["SEG", "TER", "QUA", "QUI", "SEX", "SÁB", "DOM"]
+    PROT_KEYWORDS = ["frango","atum","carne","salmão","tilápia","peixe","camarão",
+                     "whey","proteína","patinho","alcatra","filé","costela"]
+    # Refeições que devem ser ignoradas na busca (café da manhã e lanches)
+    SKIP_KEYWORDS  = ["café","lanche","manhã"]
+
+    header   = []
+    proteins = []
+
+    for i, dia in enumerate(dias):
+        label = dia.get("dia", DAYS_SHORT[i] if i < 7 else f"DIA {i+1}")
+        short = label[:3].upper()
+        header.append(Paragraph(
+            f'<font name="{LABEL_BOLD}" size="7" color="#FFCBAA">{short}</font>',
+            ParagraphStyle("oh", alignment=1, leading=10)
+        ))
+
+        prot_label = "—"
+        for ref in dia.get("refeicoes", []):
+            nome_ref = ref.get("nome", "").lower()
+            # Pula café da manhã e lanches
+            if any(sk in nome_ref for sk in SKIP_KEYWORDS):
+                continue
+            for food in ref.get("alimentos", []):
+                fl = food.lower()
+                for kw in PROT_KEYWORDS:
+                    if kw in fl:
+                        prot_label = food.split("(")[0].strip()
+                        # Capitaliza primeira letra e limita tamanho
+                        prot_label = prot_label.capitalize()[:20]
+                        break
+                if prot_label != "—":
+                    break
+            if prot_label != "—":
+                break
+
+        proteins.append(Paragraph(
+            f'<font name="{BODY_FONT}" size="7.5" color="#1C1C1C">{prot_label}</font>',
+            ParagraphStyle("op", alignment=1, leading=11)
+        ))
+
+    col_w = page_width / len(dias)
+    t = Table([header, proteins], colWidths=[col_w] * len(dias))
+    t.setStyle(TableStyle([
+        ("BACKGROUND",    (0, 0), (-1, 0), CHARCOAL),
+        ("BACKGROUND",    (0, 1), (-1, 1), ORANGE_FAINT),
+        ("BOX",           (0, 0), (-1, -1), 0.5, RULE_GRAY),
+        ("INNERGRID",     (0, 0), (-1, -1), 0.3, RULE_GRAY),
+        ("TOPPADDING",    (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ("ALIGN",         (0, 0), (-1, -1), "CENTER"),
+        ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
+    ]))
+    return t
+
+
+class DayHeader(Flowable):
+    """Faixa de cabeçalho de cada dia da semana."""
+    def __init__(self, width, day_name: str, day_number: int):
+        Flowable.__init__(self)
+        self.bw = width
+        self.day_name = day_name
+        self.day_number = day_number
+        self.height = 12 * mm
+
+    def draw(self):
+        c = self.canv
+        w, h = self.bw, self.height
+
+        # Fundo carvão
+        c.setFillColor(CHARCOAL)
+        c.roundRect(0, 0, w, h, 2*mm, fill=1, stroke=0)
+
+        # Número do dia — acento laranja à esquerda
+        c.setFillColor(ORANGE)
+        c.setFont(TITLE_FONT, 22)
+        num = str(self.day_number).zfill(2)
+        c.drawString(10, h - 8.5*mm, num)
+        num_w = c.stringWidth(num, TITLE_FONT, 22)
+
+        # Nome do dia
+        c.setFillColor(WHITE)
+        c.setFont(BODY_BOLD, 11)
+        c.drawString(10 + num_w + 6, h - 7.5*mm, self.day_name.upper())
+
+        # Linha decorativa laranja à direita
+        c.setStrokeColor(ORANGE)
+        c.setLineWidth(1)
+        c.line(w - 30, h/2, w - 10, h/2)
+
+
 def generate_nutrition_pdf(plan_data: dict) -> bytes:
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -355,6 +448,129 @@ def generate_nutrition_pdf(plan_data: dict) -> bytes:
 
     story.append(Spacer(1, 4*mm))
     story.append(FooterRule(CONTENT_W))
+
+    doc.build(story)
+    buffer.seek(0)
+    return buffer.read()
+
+
+def generate_weekly_nutrition_pdf(plan_data: dict) -> bytes:
+    """
+    Gera PDF semanal NUUtri — capa + 7 páginas, uma por dia.
+
+    plan_data esperado (além dos campos do plano diário):
+    {
+        ...campos padrão (user_name, objetivo, calorias, etc.)...
+        "dias": [
+            {
+                "dia": "Segunda-feira",
+                "refeicoes": [{"nome": "...", "alimentos": [...]}]
+            },
+            ... (7 dias)
+        ]
+    }
+    """
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer, pagesize=A4,
+        leftMargin=MARGIN, rightMargin=MARGIN,
+        topMargin=10*mm, bottomMargin=16*mm,
+    )
+
+    s = _s()
+    story = []
+    dias = plan_data.get("dias", [])
+
+    # ── PÁGINA 1: Capa ────────────────────────────────────────────────────────
+    story.append(CoverBanner(
+        CONTENT_W,
+        user_name=plan_data.get("user_name", ""),
+        objetivo=plan_data.get("objetivo", ""),
+    ))
+    story.append(Spacer(1, 6*mm))
+
+    story.append(Paragraph("Plano Nutricional Semanal", s["plan_title"]))
+    if plan_data.get("objetivo"):
+        story.append(Paragraph(plan_data["objetivo"], s["plan_sub"]))
+    story.append(HRFlowable(width=CONTENT_W, thickness=0.75, color=RULE_GRAY, spaceAfter=4*mm))
+
+    # Perfil
+    perfil = []
+    for k, lbl in [("peso","Peso"),("altura","Altura"),("idade","Idade"),
+                   ("sexo","Sexo"),("nivel_atividade","Atividade")]:
+        if plan_data.get(k):
+            perfil.append((lbl, plan_data[k]))
+
+    if perfil:
+        story.append(Paragraph("PERFIL", s["section"]))
+        cols = 3
+        rows = []
+        for i in range(0, len(perfil), cols):
+            chunk = perfil[i:i+cols]
+            while len(chunk) < cols:
+                chunk.append(("", ""))
+            row = [
+                Paragraph(
+                    f'<font name="{LABEL_BOLD}" size="7" color="#C94E00">{lbl.upper()}</font><br/>'
+                    f'<font name="{BODY_FONT}" size="9">{val}</font>',
+                    ParagraphStyle("pc", leading=14)
+                )
+                for lbl, val in chunk
+            ]
+            rows.append(row)
+        cw = CONTENT_W / cols
+        t = Table(rows, colWidths=[cw]*cols)
+        t.setStyle(TableStyle([
+            ("BACKGROUND",    (0,0),(-1,-1), ORANGE_FAINT),
+            ("BOX",           (0,0),(-1,-1), 0.5, RULE_GRAY),
+            ("INNERGRID",     (0,0),(-1,-1), 0.3, RULE_GRAY),
+            ("TOPPADDING",    (0,0),(-1,-1), 5),
+            ("BOTTOMPADDING", (0,0),(-1,-1), 5),
+            ("LEFTPADDING",   (0,0),(-1,-1), 8),
+        ]))
+        story.append(t)
+        story.append(Spacer(1, 5*mm))
+
+    # Macros diários
+    story.append(Paragraph("METAS DIÁRIAS", s["section"]))
+    story.append(MacroCard(
+        CONTENT_W,
+        plan_data.get("calorias","—"),
+        plan_data.get("proteinas","—"),
+        plan_data.get("carbs","—"),
+        plan_data.get("gorduras","—"),
+    ))
+    story.append(Spacer(1, 5*mm))
+
+    # Suplementos e observações na capa
+    if plan_data.get("suplementos"):
+        story.append(Paragraph("SUPLEMENTAÇÃO", s["section"]))
+        story.append(Paragraph(plan_data["suplementos"], s["body"]))
+        story.append(Spacer(1, 3*mm))
+
+    if plan_data.get("observacoes"):
+        story.append(Paragraph("OBSERVAÇÕES E DICAS", s["section"]))
+        story.append(Paragraph(plan_data["observacoes"], s["body"]))
+        story.append(Spacer(1, 3*mm))
+
+    story.append(Spacer(1, 4*mm))
+    story.append(FooterRule(CONTENT_W))
+
+    # ── PÁGINAS 2–8: Um dia por página ───────────────────────────────────────
+    for i, dia in enumerate(dias):
+        story.append(PageBreak())
+
+        day_name = dia.get("dia", f"Dia {i+1}")
+        story.append(DayHeader(CONTENT_W, day_name, i + 1))
+        story.append(Spacer(1, 5*mm))
+
+        refeicoes = dia.get("refeicoes", [])
+        for ref in refeicoes:
+            mb = MealBlock(CONTENT_W, ref["nome"], ref["alimentos"])
+            story.append(KeepTogether([mb, Spacer(1, 3*mm)]))
+
+        story.append(Spacer(1, 4*mm))
+        story.append(FooterRule(CONTENT_W))
 
     doc.build(story)
     buffer.seek(0)
