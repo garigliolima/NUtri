@@ -5,13 +5,17 @@ from datetime import datetime
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from reportlab.lib.units import mm
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, KeepTogether, HRFlowable, PageBreak
+from reportlab.platypus import (
+    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
+    KeepTogether, HRFlowable, PageBreak,
+)
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
 from reportlab.platypus import Flowable
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
+# ── Fontes ────────────────────────────────────────────────────────────────────
 _HERE = os.path.dirname(os.path.abspath(__file__))
 
 def _reg(name, fname):
@@ -24,19 +28,27 @@ def _reg(name, fname):
             pass
     return False
 
-_reg("Bricolage",      "BricolageGrotesque-Regular.ttf")
+_has_custom = _reg("Bricolage",      "BricolageGrotesque-Regular.ttf")
 _reg("Bricolage-Bold", "BricolageGrotesque-Bold.ttf")
 _reg("Outfit",         "Outfit-Regular.ttf")
 _reg("Outfit-Bold",    "Outfit-Bold.ttf")
 _reg("Instrument",     "InstrumentSans-Regular.ttf")
 _reg("Instrument-Bold","InstrumentSans-Bold.ttf")
 
-TITLE_FONT  = "Bricolage-Bold"
-BODY_FONT   = "Outfit"
-BODY_BOLD   = "Outfit-Bold"
-LABEL_FONT  = "Instrument"
-LABEL_BOLD  = "Instrument-Bold"
+if _has_custom:
+    TITLE_FONT  = "Bricolage-Bold"
+    BODY_FONT   = "Outfit"
+    BODY_BOLD   = "Outfit-Bold"
+    LABEL_FONT  = "Instrument"
+    LABEL_BOLD  = "Instrument-Bold"
+else:
+    TITLE_FONT  = "Helvetica-Bold"
+    BODY_FONT   = "Helvetica"
+    BODY_BOLD   = "Helvetica-Bold"
+    LABEL_FONT  = "Helvetica"
+    LABEL_BOLD  = "Helvetica-Bold"
 
+# ── Paleta ────────────────────────────────────────────────────────────────────
 ORANGE       = colors.HexColor("#FF6B1A")
 ORANGE_DARK  = colors.HexColor("#C94E00")
 ORANGE_MID   = colors.HexColor("#FF8C42")
@@ -47,20 +59,30 @@ WARM_GRAY    = colors.HexColor("#6B6560")
 RULE_GRAY    = colors.HexColor("#E8E0D8")
 WHITE        = colors.white
 
+# Cores para o donut chart de macros
+MACRO_COLORS = {
+    "proteinas": colors.HexColor("#FF6B1A"),  # laranja
+    "carbs":     colors.HexColor("#FFB347"),  # laranja claro
+    "gorduras":  colors.HexColor("#1C1C1C"),  # carvão
+}
+
 PAGE_W, PAGE_H = A4
 MARGIN    = 14 * mm
 CONTENT_W = PAGE_W - 2 * MARGIN
 
 
+# ── Arte do cabeçalho (melhorada) ─────────────────────────────────────────────
 def _draw_cover_art(c, x, y, w, h):
     c.saveState()
     clip = c.beginPath()
     clip.rect(x, y, w, h)
     c.clipPath(clip, stroke=0, fill=0)
 
+    # Gradiente simulado com retângulos
     c.setFillColor(CHARCOAL)
     c.rect(x, y, w, h, fill=1, stroke=0)
 
+    # Arco principal grosso
     c.setStrokeColor(ORANGE_DARK)
     c.setLineWidth(28)
     c.setLineCap(1)
@@ -69,6 +91,7 @@ def _draw_cover_art(c, x, y, w, h):
     path.curveTo(x + w*0.15, y + h*0.9, x + w*0.55, y + h*1.1, x + w, y + h*0.55)
     c.drawPath(path, stroke=1, fill=0)
 
+    # Arco secundário
     c.setStrokeColor(ORANGE)
     c.setLineWidth(12)
     path2 = c.beginPath()
@@ -76,6 +99,7 @@ def _draw_cover_art(c, x, y, w, h):
     path2.curveTo(x + w*0.2, y + h*1.0, x + w*0.65, y + h*1.05, x + w, y + h*0.75)
     c.drawPath(path2, stroke=1, fill=0)
 
+    # Arco terciário fino
     c.setStrokeColor(ORANGE_MID)
     c.setLineWidth(4)
     path3 = c.beginPath()
@@ -83,6 +107,7 @@ def _draw_cover_art(c, x, y, w, h):
     path3.curveTo(x + w*0.3, y + h*0.7, x + w*0.7, y + h*0.95, x + w, y + h*0.88)
     c.drawPath(path3, stroke=1, fill=0)
 
+    # Pontos decorativos
     dots = [(0.08,0.72),(0.18,0.55),(0.28,0.80),(0.42,0.62),(0.55,0.78),
             (0.65,0.50),(0.78,0.70),(0.88,0.58),(0.72,0.88),(0.35,0.42),
             (0.50,0.35),(0.15,0.35)]
@@ -94,12 +119,17 @@ def _draw_cover_art(c, x, y, w, h):
         c.setFillColor(ORANGE)
         c.circle(x + dx*w, y + dy*h, r, fill=1, stroke=0)
 
+    # Linha de base
     c.setStrokeColor(ORANGE)
     c.setLineWidth(1.5)
     c.line(x, y + 2, x + w, y + 2)
 
     c.restoreState()
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  FLOWABLES
+# ══════════════════════════════════════════════════════════════════════════════
 
 class CoverBanner(Flowable):
     def __init__(self, width, user_name="", objetivo=""):
@@ -114,18 +144,21 @@ class CoverBanner(Flowable):
         w, h = self.bw, self.height
         _draw_cover_art(c, 0, 0, w, h)
 
+        # Logo NUUtri
         c.setFillColor(WHITE)
         c.setFont(TITLE_FONT, 32)
         c.drawString(14, h - 20*mm, "NUU")
         nuu_w = c.stringWidth("NUU", TITLE_FONT, 32)
-        c.setFillColor(ORANGE)
+        c.setFillColor(colors.HexColor("#FFCBAA"))
         c.setFont(BODY_FONT, 32)
         c.drawString(14 + nuu_w, h - 20*mm, "tri")
 
+        # Tagline
         c.setFillColor(colors.HexColor("#FFCBAA"))
         c.setFont(LABEL_FONT, 7.5)
-        c.drawString(14, h - 25*mm, "NUTRIÇÃO INTELIGENTE  ·  RESULTADOS REAIS")
+        c.drawString(14, h - 25*mm, "NUTRICAO INTELIGENTE  ·  RESULTADOS REAIS")
 
+        # Nome do usuário
         if self.user_name:
             c.setFillColor(WHITE)
             c.setFont(BODY_BOLD, 10)
@@ -133,29 +166,32 @@ class CoverBanner(Flowable):
             x = w - c.stringWidth(label, BODY_BOLD, 10) - 14
             c.drawString(x, h - 18*mm, label)
 
+        # Data
         c.setFillColor(colors.HexColor("#FFCBAA"))
         c.setFont(LABEL_FONT, 7.5)
-        date_str = datetime.now().strftime("%d · %m · %Y")
+        date_str = datetime.now().strftime("%d . %m . %Y")
         x = w - c.stringWidth(date_str, LABEL_FONT, 7.5) - 14
         c.drawString(x, h - 23.5*mm, date_str)
 
+        # Objetivo
         if self.objetivo:
-            obj = self.objetivo[:42] + ("…" if len(self.objetivo) > 42 else "")
+            obj = self.objetivo[:42] + ("..." if len(self.objetivo) > 42 else "")
             x = w - c.stringWidth(obj, LABEL_FONT, 7.5) - 14
             c.drawString(x, h - 28*mm, obj)
 
 
 class MacroCard(Flowable):
+    """Cards de macros com barra de progresso proporcional."""
     def __init__(self, width, cals, prot, carbs, fats):
         Flowable.__init__(self)
         self.bw = width
         self.values = [
-            ("CALORIAS", cals, "kcal"),
-            ("PROTEÍNAS", prot, "g"),
-            ("CARBS", carbs, "g"),
-            ("GORDURAS", fats, "g"),
+            ("CALORIAS", cals, "kcal", None),
+            ("PROTEINAS", prot, "g", MACRO_COLORS["proteinas"]),
+            ("CARBS", carbs, "g", MACRO_COLORS["carbs"]),
+            ("GORDURAS", fats, "g", MACRO_COLORS["gorduras"]),
         ]
-        self.height = 24 * mm
+        self.height = 26 * mm
 
     def draw(self):
         c = self.canv
@@ -164,35 +200,171 @@ class MacroCard(Flowable):
         card_w = (self.bw - gap * (n - 1)) / n
         h = self.height
 
-        for i, (label, val, unit) in enumerate(self.values):
+        # Calcula total de calorias por macro para barras de progresso
+        try:
+            prot_cal = float(str(self.values[1][1]).replace(",", ".")) * 4
+            carb_cal = float(str(self.values[2][1]).replace(",", ".")) * 4
+            fat_cal  = float(str(self.values[3][1]).replace(",", ".")) * 9
+            total_cal = prot_cal + carb_cal + fat_cal
+            ratios = [0, prot_cal/total_cal if total_cal else 0,
+                      carb_cal/total_cal if total_cal else 0,
+                      fat_cal/total_cal if total_cal else 0]
+        except (ValueError, ZeroDivisionError):
+            ratios = [0, 0.33, 0.33, 0.33]
+
+        for i, (label, val, unit, accent_color) in enumerate(self.values):
             cx = i * (card_w + gap)
             is_first = i == 0
             bg = CHARCOAL if is_first else ORANGE_PALE
 
+            # Card background
             c.setFillColor(bg)
             c.roundRect(cx, 0, card_w, h, 3*mm, fill=1, stroke=0)
 
-            accent_c = ORANGE_MID if is_first else ORANGE
+            # Acento superior
+            accent_c = ORANGE_MID if is_first else (accent_color or ORANGE)
             c.setFillColor(accent_c)
             c.roundRect(cx, h - 2.5*mm, card_w, 2.5*mm, 2*mm, fill=1, stroke=0)
             c.rect(cx, h - 2.5*mm, card_w, 1.5*mm, fill=1, stroke=0)
 
+            # Label
             text_color = colors.HexColor("#FFCBAA") if is_first else WARM_GRAY
             c.setFillColor(text_color)
             c.setFont(LABEL_FONT, 6.5)
             c.drawCentredString(cx + card_w/2, h - 8*mm, label)
 
+            # Valor
             val_color = WHITE if is_first else CHARCOAL
             c.setFillColor(val_color)
             c.setFont(TITLE_FONT, 18)
             c.drawCentredString(cx + card_w/2, h - 16.5*mm, str(val))
 
+            # Unidade
             c.setFillColor(text_color)
             c.setFont(LABEL_FONT, 7)
             c.drawCentredString(cx + card_w/2, h - 20.5*mm, unit)
 
+            # Barra de progresso (só nos cards de macro, não no de calorias)
+            if i > 0 and ratios[i] > 0:
+                bar_y = 2.5 * mm
+                bar_w = card_w - 8*mm
+                bar_h = 2 * mm
+                bar_x = cx + 4*mm
+
+                # Fundo da barra
+                bg_bar = colors.HexColor("#E8E0D8") if not is_first else colors.HexColor("#333333")
+                c.setFillColor(bg_bar)
+                c.roundRect(bar_x, bar_y, bar_w, bar_h, 1*mm, fill=1, stroke=0)
+
+                # Preenchimento da barra
+                fill_w = bar_w * ratios[i]
+                if fill_w > 0:
+                    c.setFillColor(accent_color or ORANGE)
+                    c.roundRect(bar_x, bar_y, max(fill_w, 2*mm), bar_h, 1*mm, fill=1, stroke=0)
+
+                # Percentual
+                pct = f"{int(ratios[i]*100)}%"
+                c.setFillColor(text_color)
+                c.setFont(LABEL_FONT, 5.5)
+                c.drawCentredString(cx + card_w/2, bar_y - 2.5*mm, pct)
+
+
+class DonutChart(Flowable):
+    """Gráfico de rosca mostrando distribuição calórica dos macros."""
+    def __init__(self, width, prot, carbs, fats):
+        Flowable.__init__(self)
+        self.bw = width
+        try:
+            self.prot_cal = float(str(prot).replace(",", ".")) * 4
+            self.carb_cal = float(str(carbs).replace(",", ".")) * 4
+            self.fat_cal  = float(str(fats).replace(",", ".")) * 9
+        except ValueError:
+            self.prot_cal = self.carb_cal = self.fat_cal = 1
+        self.height = 52 * mm
+
+    def _draw_arc(self, c, cx, cy, r, start_deg, end_deg, color, width=12):
+        """Desenha um arco colorido."""
+        c.setStrokeColor(color)
+        c.setLineWidth(width)
+        c.setLineCap(1)
+
+        # Desenha o arco usando segmentos de linha
+        steps = max(int(abs(end_deg - start_deg) / 2), 1)
+        for i in range(steps):
+            a1 = math.radians(start_deg + (end_deg - start_deg) * i / steps)
+            a2 = math.radians(start_deg + (end_deg - start_deg) * (i + 1) / steps)
+            x1 = cx + r * math.cos(a1)
+            y1 = cy + r * math.sin(a1)
+            x2 = cx + r * math.cos(a2)
+            y2 = cy + r * math.sin(a2)
+            c.line(x1, y1, x2, y2)
+
+    def draw(self):
+        c = self.canv
+        total = self.prot_cal + self.carb_cal + self.fat_cal
+        if total == 0:
+            return
+
+        chart_size = 38 * mm
+        cx_chart = chart_size / 2 + 4*mm
+        cy_chart = self.height / 2
+        radius = 15 * mm
+        ring_w = 10
+
+        segments = [
+            (self.prot_cal / total, MACRO_COLORS["proteinas"], "Proteinas"),
+            (self.carb_cal / total, MACRO_COLORS["carbs"], "Carboidratos"),
+            (self.fat_cal  / total, MACRO_COLORS["gorduras"], "Gorduras"),
+        ]
+
+        # Desenha o donut
+        start = 90
+        for ratio, color, _ in segments:
+            sweep = ratio * 360
+            if sweep > 0:
+                self._draw_arc(c, cx_chart, cy_chart, radius, start, start + sweep, color, ring_w)
+                start += sweep
+
+        # Centro do donut — total de calorias
+        c.setFillColor(WHITE)
+        c.circle(cx_chart, cy_chart, radius - 8, fill=1, stroke=0)
+        c.setFillColor(CHARCOAL)
+        c.setFont(TITLE_FONT, 13)
+        total_kcal = str(int(total))
+        c.drawCentredString(cx_chart, cy_chart + 1*mm, total_kcal)
+        c.setFillColor(WARM_GRAY)
+        c.setFont(LABEL_FONT, 6)
+        c.drawCentredString(cx_chart, cy_chart - 4*mm, "kcal totais")
+
+        # Legenda ao lado do donut
+        legend_x = cx_chart + radius + 18*mm
+        legend_y = cy_chart + 14*mm
+        legend_data = [
+            (MACRO_COLORS["proteinas"], "Proteinas", self.prot_cal, f"{int(self.prot_cal/total*100)}%"),
+            (MACRO_COLORS["carbs"],     "Carboidratos", self.carb_cal, f"{int(self.carb_cal/total*100)}%"),
+            (MACRO_COLORS["gorduras"],  "Gorduras", self.fat_cal, f"{int(self.fat_cal/total*100)}%"),
+        ]
+
+        for i, (color, name, cals, pct) in enumerate(legend_data):
+            ly = legend_y - i * 12*mm
+
+            # Bolinha colorida
+            c.setFillColor(color)
+            c.circle(legend_x, ly + 1.5, 3, fill=1, stroke=0)
+
+            # Nome
+            c.setFillColor(CHARCOAL)
+            c.setFont(BODY_BOLD, 8.5)
+            c.drawString(legend_x + 8, ly, name)
+
+            # Valor e percentual
+            c.setFillColor(WARM_GRAY)
+            c.setFont(LABEL_FONT, 7)
+            c.drawString(legend_x + 8, ly - 4.5*mm, f"{int(cals)} kcal  ·  {pct}")
+
 
 class MealBlock(Flowable):
+    """Bloco de refeicao com acento lateral e visual refinado."""
     def __init__(self, width, meal_name, foods):
         Flowable.__init__(self)
         self.bw = width
@@ -205,30 +377,119 @@ class MealBlock(Flowable):
         w, h = self.bw, self.height
         accent = 3.5 * mm
 
+        # Background
         c.setFillColor(ORANGE_FAINT)
         c.roundRect(0, 0, w, h, 2.5*mm, fill=1, stroke=0)
 
+        # Acento lateral laranja
         c.setFillColor(ORANGE)
         c.roundRect(0, 0, accent, h, 2.5*mm, fill=1, stroke=0)
         c.rect(accent - 2, 0, 2, h, fill=1, stroke=0)
 
+        # Nome da refeicao
         c.setFillColor(CHARCOAL)
         c.setFont(BODY_BOLD, 9.5)
         c.drawString(accent + 6, h - 7.5*mm, self.meal_name)
 
+        # Linha separadora
         c.setStrokeColor(RULE_GRAY)
         c.setLineWidth(0.5)
         c.line(accent + 6, h - 9.2*mm, w - 6, h - 9.2*mm)
 
+        # Alimentos
         for i, food in enumerate(self.foods):
             fy = h - 9.2*mm - (i + 1) * 6.5*mm + 1.5*mm
+
+            # Bullet decorativo
             c.setFillColor(ORANGE_MID)
             c.circle(accent + 10, fy + 2.2, 1.2, fill=1, stroke=0)
+
+            # Texto do alimento
             c.setFillColor(WARM_GRAY)
             c.setFont(BODY_FONT, 8.5)
             max_chars = int((w - accent - 22) / 4.2)
-            text = food if len(food) <= max_chars else food[:max_chars] + "…"
+            text = food if len(food) <= max_chars else food[:max_chars] + "..."
             c.drawString(accent + 16, fy, text)
+
+
+class HydrationBlock(Flowable):
+    """Bloco visual para recomendacao de hidratacao."""
+    def __init__(self, width, liters="2.5"):
+        Flowable.__init__(self)
+        self.bw = width
+        self.liters = liters
+        self.height = 18 * mm
+
+    def draw(self):
+        c = self.canv
+        w, h = self.bw, self.height
+
+        # Background
+        c.setFillColor(colors.HexColor("#E8F4FD"))
+        c.roundRect(0, 0, w, h, 3*mm, fill=1, stroke=0)
+
+        # Acento lateral azul
+        c.setFillColor(colors.HexColor("#4A90D9"))
+        c.roundRect(0, 0, 3.5*mm, h, 2.5*mm, fill=1, stroke=0)
+        c.rect(1.5*mm, 0, 2*mm, h, fill=1, stroke=0)
+
+        # Icone de agua (gota simples)
+        drop_x = 14*mm
+        drop_y = h/2
+        c.setFillColor(colors.HexColor("#4A90D9"))
+        c.setFont(TITLE_FONT, 16)
+        # Usar um circulo como icone
+        c.circle(drop_x, drop_y, 4*mm, fill=1, stroke=0)
+        c.setFillColor(WHITE)
+        c.setFont(BODY_BOLD, 9)
+        c.drawCentredString(drop_x, drop_y - 1.2*mm, "H2O")
+
+        # Texto
+        c.setFillColor(colors.HexColor("#2C5F8A"))
+        c.setFont(BODY_BOLD, 10)
+        c.drawString(24*mm, h - 6.5*mm, f"Hidratacao: {self.liters}L por dia")
+
+        c.setFillColor(colors.HexColor("#5A8BB5"))
+        c.setFont(BODY_FONT, 8)
+        c.drawString(24*mm, h - 11.5*mm, "Distribua ao longo do dia. Aumente em dias de treino.")
+
+        # 8 gotinhas representando copos
+        glass_x = w - 40*mm
+        for i in range(8):
+            gx = glass_x + i * 4.5*mm
+            gy = h/2 - 1.5*mm
+            c.setFillColor(colors.HexColor("#4A90D9"))
+            c.circle(gx, gy, 1.5*mm, fill=1, stroke=0)
+
+
+class SectionDivider(Flowable):
+    """Divisor de secao com linha e icone."""
+    def __init__(self, width):
+        Flowable.__init__(self)
+        self.bw = width
+        self.height = 3 * mm
+
+    def draw(self):
+        c = self.canv
+        w = self.bw
+        y = self.height / 2
+
+        # Linha com gradiente simulado
+        c.setStrokeColor(RULE_GRAY)
+        c.setLineWidth(0.5)
+        c.line(0, y, w, y)
+
+        # Losango central decorativo
+        cx = w / 2
+        c.setFillColor(ORANGE)
+        size = 1.5*mm
+        path = c.beginPath()
+        path.moveTo(cx, y + size)
+        path.lineTo(cx + size, y)
+        path.lineTo(cx, y - size)
+        path.lineTo(cx - size, y)
+        path.close()
+        c.drawPath(path, fill=1, stroke=0)
 
 
 class FooterRule(Flowable):
@@ -244,11 +505,46 @@ class FooterRule(Flowable):
         c.line(0, self.height - 0.5, self.bw, self.height - 0.5)
         c.setFillColor(WARM_GRAY)
         c.setFont(LABEL_FONT, 6.5)
-        c.drawString(0, 2.5, "NUUtri · Plano gerado por inteligência artificial · Não substitui acompanhamento nutricional profissional")
+        c.drawString(0, 2.5, "NUUtri . Plano gerado por inteligencia artificial . Nao substitui acompanhamento nutricional profissional")
         c.setFillColor(ORANGE_DARK)
         c.setFont(LABEL_BOLD, 6.5)
         c.drawRightString(self.bw, 2.5, "nuutri.app")
 
+
+class DayHeader(Flowable):
+    """Faixa de cabecalho de cada dia da semana."""
+    def __init__(self, width, day_name: str, day_number: int):
+        Flowable.__init__(self)
+        self.bw = width
+        self.day_name = day_name
+        self.day_number = day_number
+        self.height = 12 * mm
+
+    def draw(self):
+        c = self.canv
+        w, h = self.bw, self.height
+
+        c.setFillColor(CHARCOAL)
+        c.roundRect(0, 0, w, h, 2*mm, fill=1, stroke=0)
+
+        c.setFillColor(ORANGE)
+        c.setFont(TITLE_FONT, 22)
+        num = str(self.day_number).zfill(2)
+        c.drawString(10, h - 8.5*mm, num)
+        num_w = c.stringWidth(num, TITLE_FONT, 22)
+
+        c.setFillColor(WHITE)
+        c.setFont(BODY_BOLD, 11)
+        c.drawString(10 + num_w + 6, h - 7.5*mm, self.day_name.upper())
+
+        c.setStrokeColor(ORANGE)
+        c.setLineWidth(1)
+        c.line(w - 30, h/2, w - 10, h/2)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  ESTILOS
+# ══════════════════════════════════════════════════════════════════════════════
 
 def _s():
     return {
@@ -266,13 +562,15 @@ def _s():
     }
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+#  TABELA SEMANAL
+# ══════════════════════════════════════════════════════════════════════════════
+
 def _weekly_overview_table(dias: list, page_width: float) -> Table:
-    """Tabela resumo da semana — proteína principal do almoço/jantar de cada dia."""
-    DAYS_SHORT = ["SEG", "TER", "QUA", "QUI", "SEX", "SÁB", "DOM"]
-    PROT_KEYWORDS = ["frango","atum","carne","salmão","tilápia","peixe","camarão",
-                     "whey","proteína","patinho","alcatra","filé","costela"]
-    # Refeições que devem ser ignoradas na busca (café da manhã e lanches)
-    SKIP_KEYWORDS  = ["café","lanche","manhã"]
+    DAYS_SHORT = ["SEG", "TER", "QUA", "QUI", "SEX", "SAB", "DOM"]
+    PROT_KEYWORDS = ["frango","atum","carne","salmao","tilapia","peixe","camarao",
+                     "whey","proteina","patinho","alcatra","file","costela"]
+    SKIP_KEYWORDS = ["cafe","lanche","manha"]
 
     header   = []
     proteins = []
@@ -285,10 +583,9 @@ def _weekly_overview_table(dias: list, page_width: float) -> Table:
             ParagraphStyle("oh", alignment=1, leading=10)
         ))
 
-        prot_label = "—"
+        prot_label = "---"
         for ref in dia.get("refeicoes", []):
             nome_ref = ref.get("nome", "").lower()
-            # Pula café da manhã e lanches
             if any(sk in nome_ref for sk in SKIP_KEYWORDS):
                 continue
             for food in ref.get("alimentos", []):
@@ -296,12 +593,11 @@ def _weekly_overview_table(dias: list, page_width: float) -> Table:
                 for kw in PROT_KEYWORDS:
                     if kw in fl:
                         prot_label = food.split("(")[0].strip()
-                        # Capitaliza primeira letra e limita tamanho
                         prot_label = prot_label.capitalize()[:20]
                         break
-                if prot_label != "—":
+                if prot_label != "---":
                     break
-            if prot_label != "—":
+            if prot_label != "---":
                 break
 
         proteins.append(Paragraph(
@@ -324,40 +620,24 @@ def _weekly_overview_table(dias: list, page_width: float) -> Table:
     return t
 
 
-class DayHeader(Flowable):
-    """Faixa de cabeçalho de cada dia da semana."""
-    def __init__(self, width, day_name: str, day_number: int):
-        Flowable.__init__(self)
-        self.bw = width
-        self.day_name = day_name
-        self.day_number = day_number
-        self.height = 12 * mm
+# ══════════════════════════════════════════════════════════════════════════════
+#  PAGE NUMBERING CALLBACK
+# ══════════════════════════════════════════════════════════════════════════════
 
-    def draw(self):
-        c = self.canv
-        w, h = self.bw, self.height
+def _add_page_number(canvas, doc):
+    """Adiciona numero de pagina no rodape de cada pagina."""
+    page_num = canvas.getPageNumber()
+    text = f"{page_num}"
+    canvas.saveState()
+    canvas.setFont(LABEL_FONT, 7)
+    canvas.setFillColor(WARM_GRAY)
+    canvas.drawCentredString(PAGE_W / 2, 8 * mm, text)
+    canvas.restoreState()
 
-        # Fundo carvão
-        c.setFillColor(CHARCOAL)
-        c.roundRect(0, 0, w, h, 2*mm, fill=1, stroke=0)
 
-        # Número do dia — acento laranja à esquerda
-        c.setFillColor(ORANGE)
-        c.setFont(TITLE_FONT, 22)
-        num = str(self.day_number).zfill(2)
-        c.drawString(10, h - 8.5*mm, num)
-        num_w = c.stringWidth(num, TITLE_FONT, 22)
-
-        # Nome do dia
-        c.setFillColor(WHITE)
-        c.setFont(BODY_BOLD, 11)
-        c.drawString(10 + num_w + 6, h - 7.5*mm, self.day_name.upper())
-
-        # Linha decorativa laranja à direita
-        c.setStrokeColor(ORANGE)
-        c.setLineWidth(1)
-        c.line(w - 30, h/2, w - 10, h/2)
-
+# ══════════════════════════════════════════════════════════════════════════════
+#  GERADORES DE PDF
+# ══════════════════════════════════════════════════════════════════════════════
 
 def generate_nutrition_pdf(plan_data: dict) -> bytes:
     buffer = io.BytesIO()
@@ -370,6 +650,7 @@ def generate_nutrition_pdf(plan_data: dict) -> bytes:
     s = _s()
     story = []
 
+    # ── CAPA / BANNER ─────────────────────────────────────────────────────────
     story.append(CoverBanner(
         CONTENT_W,
         user_name=plan_data.get("user_name", ""),
@@ -382,6 +663,7 @@ def generate_nutrition_pdf(plan_data: dict) -> bytes:
         story.append(Paragraph(plan_data["objetivo"], s["plan_sub"]))
     story.append(HRFlowable(width=CONTENT_W, thickness=0.75, color=RULE_GRAY, spaceAfter=4*mm))
 
+    # ── PERFIL ────────────────────────────────────────────────────────────────
     perfil = []
     for k, lbl in [("peso","Peso"),("altura","Altura"),("idade","Idade"),
                    ("sexo","Sexo"),("nivel_atividade","Atividade")]:
@@ -408,7 +690,7 @@ def generate_nutrition_pdf(plan_data: dict) -> bytes:
         cw = CONTENT_W / cols
         t = Table(rows, colWidths=[cw]*cols)
         t.setStyle(TableStyle([
-            ("BACKGROUND",    (0,0),(-1,-1), ORANGE_FAINT),
+            ("BACKGROUND",    (0,0),(-1,-1), ORANGE_PALE),
             ("BOX",           (0,0),(-1,-1), 0.5, RULE_GRAY),
             ("INNERGRID",     (0,0),(-1,-1), 0.3, RULE_GRAY),
             ("TOPPADDING",    (0,0),(-1,-1), 5),
@@ -418,58 +700,80 @@ def generate_nutrition_pdf(plan_data: dict) -> bytes:
         story.append(t)
         story.append(Spacer(1, 5*mm))
 
-    story.append(Paragraph("METAS DIÁRIAS", s["section"]))
+    # ── METAS DIARIAS ─────────────────────────────────────────────────────────
+    story.append(Paragraph("METAS DIARIAS", s["section"]))
     story.append(MacroCard(
         CONTENT_W,
-        plan_data.get("calorias","—"),
-        plan_data.get("proteinas","—"),
-        plan_data.get("carbs","—"),
-        plan_data.get("gorduras","—"),
+        plan_data.get("calorias","---"),
+        plan_data.get("proteinas","---"),
+        plan_data.get("carbs","---"),
+        plan_data.get("gorduras","---"),
     ))
-    story.append(Spacer(1, 6*mm))
+    story.append(Spacer(1, 4*mm))
 
+    # ── GRAFICO DE DISTRIBUICAO ───────────────────────────────────────────────
+    try:
+        prot_val = plan_data.get("proteinas", "0")
+        carb_val = plan_data.get("carbs", "0")
+        fat_val  = plan_data.get("gorduras", "0")
+        if all(v and str(v) not in ("---", "0") for v in [prot_val, carb_val, fat_val]):
+            story.append(Paragraph("DISTRIBUICAO CALORICA", s["section"]))
+            story.append(DonutChart(CONTENT_W, prot_val, carb_val, fat_val))
+            story.append(Spacer(1, 2*mm))
+    except Exception:
+        pass
+
+    story.append(SectionDivider(CONTENT_W))
+    story.append(Spacer(1, 3*mm))
+
+    # ── HIDRATACAO ────────────────────────────────────────────────────────────
+    # Estima hidratacao baseado no peso
+    try:
+        peso_str = str(plan_data.get("peso", "70")).replace("kg", "").replace(",", ".").strip()
+        peso_num = float(peso_str)
+        liters = round(peso_num * 0.035, 1)
+    except (ValueError, TypeError):
+        liters = 2.5
+    story.append(HydrationBlock(CONTENT_W, str(liters)))
+    story.append(Spacer(1, 4*mm))
+
+    story.append(SectionDivider(CONTENT_W))
+    story.append(Spacer(1, 3*mm))
+
+    # ── REFEICOES ─────────────────────────────────────────────────────────────
     refeicoes = plan_data.get("refeicoes", [])
     if refeicoes:
-        story.append(Paragraph("CARDÁPIO DO DIA", s["section"]))
+        story.append(Paragraph("CARDAPIO DO DIA", s["section"]))
         story.append(Spacer(1, 2*mm))
         for ref in refeicoes:
             mb = MealBlock(CONTENT_W, ref["nome"], ref["alimentos"])
             story.append(KeepTogether([mb, Spacer(1, 3*mm)]))
 
+    # ── SUPLEMENTACAO ─────────────────────────────────────────────────────────
     if plan_data.get("suplementos"):
-        story.append(Paragraph("SUPLEMENTAÇÃO", s["section"]))
+        story.append(SectionDivider(CONTENT_W))
+        story.append(Spacer(1, 3*mm))
+        story.append(Paragraph("SUPLEMENTACAO", s["section"]))
         story.append(Paragraph(plan_data["suplementos"], s["body"]))
         story.append(Spacer(1, 3*mm))
 
+    # ── OBSERVACOES ───────────────────────────────────────────────────────────
     if plan_data.get("observacoes"):
-        story.append(Paragraph("OBSERVAÇÕES E DICAS", s["section"]))
+        story.append(Paragraph("OBSERVACOES E DICAS", s["section"]))
         story.append(Paragraph(plan_data["observacoes"], s["body"]))
         story.append(Spacer(1, 3*mm))
 
+    # ── RODAPE ────────────────────────────────────────────────────────────────
     story.append(Spacer(1, 4*mm))
     story.append(FooterRule(CONTENT_W))
 
-    doc.build(story)
+    doc.build(story, onFirstPage=_add_page_number, onLaterPages=_add_page_number)
     buffer.seek(0)
     return buffer.read()
 
 
 def generate_weekly_nutrition_pdf(plan_data: dict) -> bytes:
-    """
-    Gera PDF semanal NUUtri — capa + 7 páginas, uma por dia.
-
-    plan_data esperado (além dos campos do plano diário):
-    {
-        ...campos padrão (user_name, objetivo, calorias, etc.)...
-        "dias": [
-            {
-                "dia": "Segunda-feira",
-                "refeicoes": [{"nome": "...", "alimentos": [...]}]
-            },
-            ... (7 dias)
-        ]
-    }
-    """
+    """Gera PDF semanal NUUtri — capa + 7 paginas, uma por dia."""
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
         buffer, pagesize=A4,
@@ -481,7 +785,7 @@ def generate_weekly_nutrition_pdf(plan_data: dict) -> bytes:
     story = []
     dias = plan_data.get("dias", [])
 
-    # ── PÁGINA 1: Capa ────────────────────────────────────────────────────────
+    # ── PAGINA 1: Capa ────────────────────────────────────────────────────────
     story.append(CoverBanner(
         CONTENT_W,
         user_name=plan_data.get("user_name", ""),
@@ -521,7 +825,7 @@ def generate_weekly_nutrition_pdf(plan_data: dict) -> bytes:
         cw = CONTENT_W / cols
         t = Table(rows, colWidths=[cw]*cols)
         t.setStyle(TableStyle([
-            ("BACKGROUND",    (0,0),(-1,-1), ORANGE_FAINT),
+            ("BACKGROUND",    (0,0),(-1,-1), ORANGE_PALE),
             ("BOX",           (0,0),(-1,-1), 0.5, RULE_GRAY),
             ("INNERGRID",     (0,0),(-1,-1), 0.3, RULE_GRAY),
             ("TOPPADDING",    (0,0),(-1,-1), 5),
@@ -531,32 +835,54 @@ def generate_weekly_nutrition_pdf(plan_data: dict) -> bytes:
         story.append(t)
         story.append(Spacer(1, 5*mm))
 
-    # Macros diários
-    story.append(Paragraph("METAS DIÁRIAS", s["section"]))
+    # Macros diarios
+    story.append(Paragraph("METAS DIARIAS", s["section"]))
     story.append(MacroCard(
         CONTENT_W,
-        plan_data.get("calorias","—"),
-        plan_data.get("proteinas","—"),
-        plan_data.get("carbs","—"),
-        plan_data.get("gorduras","—"),
+        plan_data.get("calorias","---"),
+        plan_data.get("proteinas","---"),
+        plan_data.get("carbs","---"),
+        plan_data.get("gorduras","---"),
     ))
-    story.append(Spacer(1, 5*mm))
+    story.append(Spacer(1, 4*mm))
 
-    # Suplementos e observações na capa
+    # Grafico donut na capa semanal
+    try:
+        prot_val = plan_data.get("proteinas", "0")
+        carb_val = plan_data.get("carbs", "0")
+        fat_val  = plan_data.get("gorduras", "0")
+        if all(v and str(v) not in ("---", "0") for v in [prot_val, carb_val, fat_val]):
+            story.append(Paragraph("DISTRIBUICAO CALORICA", s["section"]))
+            story.append(DonutChart(CONTENT_W, prot_val, carb_val, fat_val))
+            story.append(Spacer(1, 2*mm))
+    except Exception:
+        pass
+
+    # Hidratacao
+    try:
+        peso_str = str(plan_data.get("peso", "70")).replace("kg", "").replace(",", ".").strip()
+        peso_num = float(peso_str)
+        liters = round(peso_num * 0.035, 1)
+    except (ValueError, TypeError):
+        liters = 2.5
+    story.append(HydrationBlock(CONTENT_W, str(liters)))
+    story.append(Spacer(1, 4*mm))
+
+    # Suplementos e observacoes na capa
     if plan_data.get("suplementos"):
-        story.append(Paragraph("SUPLEMENTAÇÃO", s["section"]))
+        story.append(Paragraph("SUPLEMENTACAO", s["section"]))
         story.append(Paragraph(plan_data["suplementos"], s["body"]))
         story.append(Spacer(1, 3*mm))
 
     if plan_data.get("observacoes"):
-        story.append(Paragraph("OBSERVAÇÕES E DICAS", s["section"]))
+        story.append(Paragraph("OBSERVACOES E DICAS", s["section"]))
         story.append(Paragraph(plan_data["observacoes"], s["body"]))
         story.append(Spacer(1, 3*mm))
 
     story.append(Spacer(1, 4*mm))
     story.append(FooterRule(CONTENT_W))
 
-    # ── PÁGINAS 2–8: Um dia por página ───────────────────────────────────────
+    # ── PAGINAS 2-8: Um dia por pagina ───────────────────────────────────────
     for i, dia in enumerate(dias):
         story.append(PageBreak())
 
@@ -572,6 +898,6 @@ def generate_weekly_nutrition_pdf(plan_data: dict) -> bytes:
         story.append(Spacer(1, 4*mm))
         story.append(FooterRule(CONTENT_W))
 
-    doc.build(story)
+    doc.build(story, onFirstPage=_add_page_number, onLaterPages=_add_page_number)
     buffer.seek(0)
     return buffer.read()
