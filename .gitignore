@@ -1,0 +1,28 @@
+# Bancos de dados gerados em runtime
+nuutri.db
+nuutri.db-journal
+nuutri.db-wal
+nuutri.db-shm
+taco.db
+taco.db-journal
+taco.db-wal
+taco.db-shm
+
+# Variáveis de ambiente
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# PDFs gerados
+*.pdf
+
+# macOS
+.DS_Store
