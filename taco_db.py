@@ -492,6 +492,11 @@ _ALIMENTOS_TBCA = [
 
 def init_taco_db():
     """Cria o banco nutricional se não existir e popula com dados TACO + TBCA."""
+    # Se o arquivo existe mas está vazio (0 bytes), remove para recriar do zero
+    if os.path.exists(TACO_DB_PATH) and os.path.getsize(TACO_DB_PATH) == 0:
+        os.remove(TACO_DB_PATH)
+        logger.info("TACO: banco vazio detectado e removido para recriação.")
+
     with _conn() as con:
         con.executescript("""
             CREATE TABLE IF NOT EXISTS alimentos (

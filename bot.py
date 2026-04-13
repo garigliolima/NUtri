@@ -267,6 +267,7 @@ async def call_claude(user_id: int, message_content: list, profile: dict, taco_c
         max_tokens=2048,
         system=system,
         messages=history,
+        timeout=60.0,
     )
     if not response.content:
         logger.error("Resposta vazia recebida da API do Claude")
@@ -300,13 +301,28 @@ async def _process_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text
         termos = _extrair_termos_alimentos(text)
         taco_context = gerar_contexto_nutricional(termos) if termos else ""
 
-        reply = await call_claude(user.id, [{"type": "text", "text": text}], profile, taco_context, use_opus=use_opus)
+        try:
+            reply = await call_claude(user.id, [{"type": "text", "text": text}], profile, taco_context, use_opus=use_opus)
+        except anthropic.APITimeoutError:
+            logger.warning(f"Timeout na chamada ao Claude para user {user.id}")
+            await update.message.reply_text("⏱️ O servidor demorou demais para responder. Tenta de novo em instantes!")
+            return
+        except anthropic.APIError as e:
+            logger.error(f"Erro da API Anthropic para user {user.id}: {e}")
+            await update.message.reply_text("❌ Tive um problema ao conectar com a IA. Tenta de novo em instantes!")
+            return
 
         # Detecta JSON de plano nutricional
         if '"GERAR_PDF"' in reply:
-            json_start = reply.find("{")
+            # Remove code fences que o Claude pode adicionar (```json ... ```)
+            stripped = reply.strip()
+            if stripped.startswith("```"):
+                stripped = re.sub(r'^```(?:json)?\n?', '', stripped)
+                stripped = re.sub(r'\n?```$', '', stripped.strip())
+
+            json_start = stripped.find("{")
             try:
-                plan_data = json.loads(reply[json_start:]) if json_start != -1 else None
+                plan_data = json.loads(stripped[json_start:]) if json_start != -1 else None
                 if plan_data and plan_data.get("GERAR_PDF"):
                     semanal = context.user_data.pop("plano_semanal", False)
                     tipo = "semanal" if semanal else "diário"
@@ -339,13 +355,17 @@ async def _process_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text
                         parse_mode="Markdown"
                     )
                     return
-            except json.JSONDecodeError:
-                pass
+            except json.JSONDecodeError as e:
+                logger.error(f"Erro ao parsear JSON do plano para user {user.id}: {e}\nResposta: {reply[:300]}")
+                await update.message.reply_text(
+                    "⚠️ Houve um problema ao gerar seu plano. Por favor, tente novamente digitando /plano."
+                )
+                return
 
         await _safe_reply(update.message, reply)
 
     except Exception as e:
-        logger.error(f"Erro: {e}")
+        logger.error(f"Erro inesperado em _process_text para user {update.effective_user.id}: {e}")
         await update.message.reply_text("⚠️ Ops! Tive um probleminha. Tenta de novo em instantes!")
 
 
