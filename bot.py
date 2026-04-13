@@ -7,7 +7,7 @@ import logging
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 import anthropic
-from pdf_generator import generate_nutrition_pdf
+from pdf_generator import generate_nutrition_pdf, generate_weekly_nutrition_pdf
 from database import (
     init_db, upsert_user, get_profile, get_history,
     save_message, clear_history, save_plan,
@@ -18,9 +18,13 @@ from taco_db import init_taco_db, buscar_alimento, gerar_contexto_nutricional, r
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-TELEGRAM_TOKEN     = os.environ["TELEGRAM_TOKEN"]
-ANTHROPIC_API_KEY  = os.environ["ANTHROPIC_API_KEY"]
+TELEGRAM_TOKEN      = os.environ["TELEGRAM_TOKEN"]
+ANTHROPIC_API_KEY   = os.environ["ANTHROPIC_API_KEY"]
 RATE_LIMIT_PER_HOUR = int(os.environ.get("RATE_LIMIT_PER_HOUR", "40"))
+OWNER_ID            = int(os.environ.get("OWNER_ID", "0"))
+
+MODEL_OPUS  = "claude-opus-4-5"
+MODEL_HAIKU = "claude-haiku-4-5-20251001"
 
 client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
@@ -84,6 +88,14 @@ _FOOD_KEYWORDS = [
     "batata doce", "couve", "rúcula", "alface", "pepino", "beterraba",
     "chocolate", "mel", "açúcar", "pipoca", "cuscuz",
 ]
+
+
+async def _safe_reply(message, text: str):
+    """Envia resposta com Markdown; faz fallback para texto puro se o parse falhar."""
+    try:
+        await message.reply_text(text, parse_mode="Markdown")
+    except Exception:
+        await message.reply_text(text)
 
 
 def _extrair_termos_alimentos(texto: str) -> list[str]:
@@ -176,6 +188,9 @@ async def perfil_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Comando oculto /stats para o dono do bot acompanhar uso."""
+    if OWNER_ID and update.effective_user.id != OWNER_ID:
+        await update.message.reply_text("⚠️ Comando não disponível.")
+        return
     stats = get_stats()
     taco = resumo_banco()
     msg = (
@@ -195,23 +210,43 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def plano_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     upsert_user(user.id, first_name=user.first_name or "", username=user.username or "")
+
+    semanal = bool(context.args and "semanal" in [a.lower() for a in context.args])
+    context.user_data["plano_semanal"] = semanal
+
     profile = get_profile(user.id)
-    if profile.get("nome") and profile.get("peso") and profile.get("objetivo"):
-        trigger = (
-            f"O usuário quer gerar um novo plano nutricional em PDF. "
-            f"Já tenho as informações dele no perfil. Gere o JSON do plano diretamente. "
-            f"Use os valores da tabela TACO para os alimentos."
-        )
+    tem_perfil = profile.get("nome") and profile.get("peso") and profile.get("objetivo")
+
+    if semanal:
+        if tem_perfil:
+            trigger = (
+                "O usuário quer gerar um plano nutricional SEMANAL (7 dias) em PDF. "
+                "Já tenho as informações dele no perfil. Gere o JSON do plano com refeições para cada dia da semana. "
+                "Use os valores da tabela TACO para os alimentos."
+            )
+        else:
+            trigger = (
+                "Quero gerar meu plano nutricional SEMANAL personalizado em PDF (7 dias completos). "
+                "Se ainda não tiver minhas informações, me pergunte sobre: "
+                "nome, peso, altura, idade, sexo, objetivo e nível de atividade física."
+            )
     else:
-        trigger = (
-            "Quero gerar meu plano nutricional personalizado em PDF. "
-            "Se ainda não tiver minhas informações, me pergunte sobre: "
-            "nome, peso, altura, idade, sexo, objetivo e nível de atividade física."
-        )
-    await _process_text(update, context, trigger)
+        if tem_perfil:
+            trigger = (
+                "O usuário quer gerar um novo plano nutricional em PDF. "
+                "Já tenho as informações dele no perfil. Gere o JSON do plano diretamente. "
+                "Use os valores da tabela TACO para os alimentos."
+            )
+        else:
+            trigger = (
+                "Quero gerar meu plano nutricional personalizado em PDF. "
+                "Se ainda não tiver minhas informações, me pergunte sobre: "
+                "nome, peso, altura, idade, sexo, objetivo e nível de atividade física."
+            )
+    await _process_text(update, context, trigger, use_opus=True)
 
 
-async def call_claude(user_id: int, message_content: list, profile: dict, taco_context: str = "") -> str:
+async def call_claude(user_id: int, message_content: list, profile: dict, taco_context: str = "", use_opus: bool = False) -> str:
     history = get_history(user_id)
 
     # Salva mensagem do usuário no banco
@@ -224,13 +259,18 @@ async def call_claude(user_id: int, message_content: list, profile: dict, taco_c
     })
 
     system = _build_system_with_profile(profile, taco_context)
+    model = MODEL_OPUS if use_opus else MODEL_HAIKU
+    logger.info(f"Chamando Claude com modelo: {model}")
 
     response = client.messages.create(
-        model="claude-opus-4-5",
+        model=model,
         max_tokens=2048,
         system=system,
         messages=history,
     )
+    if not response.content:
+        logger.error("Resposta vazia recebida da API do Claude")
+        raise ValueError("Resposta vazia da API")
     reply = response.content[0].text
 
     # Salva resposta no banco
@@ -238,7 +278,7 @@ async def call_claude(user_id: int, message_content: list, profile: dict, taco_c
     return reply
 
 
-async def _process_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str):
+async def _process_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, use_opus: bool = False):
     user = update.effective_user
     upsert_user(user.id, first_name=user.first_name or "", username=user.username or "")
 
@@ -260,25 +300,32 @@ async def _process_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text
         termos = _extrair_termos_alimentos(text)
         taco_context = gerar_contexto_nutricional(termos) if termos else ""
 
-        reply = await call_claude(user.id, [{"type": "text", "text": text}], profile, taco_context)
+        reply = await call_claude(user.id, [{"type": "text", "text": text}], profile, taco_context, use_opus=use_opus)
 
         # Detecta JSON de plano nutricional
-        stripped = reply.strip()
-        if stripped.startswith("{") and '"GERAR_PDF"' in stripped:
+        if '"GERAR_PDF"' in reply:
+            json_start = reply.find("{")
             try:
-                plan_data = json.loads(stripped)
-                if plan_data.get("GERAR_PDF"):
-                    await update.message.reply_text("📄 Gerando seu plano NUUtri personalizado...")
+                plan_data = json.loads(reply[json_start:]) if json_start != -1 else None
+                if plan_data and plan_data.get("GERAR_PDF"):
+                    semanal = context.user_data.pop("plano_semanal", False)
+                    tipo = "semanal" if semanal else "diário"
+                    await update.message.reply_text(f"📄 Gerando seu plano NUUtri {tipo} personalizado...")
                     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_document")
 
-                    pdf_bytes = generate_nutrition_pdf(plan_data)
-                    save_plan(user.id, plan_data)  # persiste no banco
+                    pdf_bytes = (
+                        generate_weekly_nutrition_pdf(plan_data)
+                        if semanal
+                        else generate_nutrition_pdf(plan_data)
+                    )
+                    save_plan(user.id, plan_data)
 
                     nome = plan_data.get("user_name", "usuario").replace(" ", "_")
+                    sufixo = "_semanal" if semanal else ""
                     await context.bot.send_document(
                         chat_id=update.effective_chat.id,
                         document=io.BytesIO(pdf_bytes),
-                        filename=f"plano_nuutri_{nome}.pdf",
+                        filename=f"plano_nuutri_{nome}{sufixo}.pdf",
                         caption=(
                             f"✅ *Seu plano NUUtri está pronto!*\n\n"
                             f"🎯 Objetivo: {plan_data.get('objetivo', '')}\n"
@@ -295,7 +342,7 @@ async def _process_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text
             except json.JSONDecodeError:
                 pass
 
-        await update.message.reply_text(reply, parse_mode="Markdown")
+        await _safe_reply(update.message, reply)
 
     except Exception as e:
         logger.error(f"Erro: {e}")
@@ -332,8 +379,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             {"type": "text", "text": caption},
         ]
         profile = get_profile(user.id)
-        reply = await call_claude(user.id, message_content, profile, taco_context)
-        await update.message.reply_text(reply, parse_mode="Markdown")
+        reply = await call_claude(user.id, message_content, profile, taco_context, use_opus=True)
+        await _safe_reply(update.message, reply)
     except Exception as e:
         logger.error(f"Erro ao processar imagem: {e}")
         await update.message.reply_text("⚠️ Não consegui analisar a imagem. Tenta de novo ou descreve por texto!")
