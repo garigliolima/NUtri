@@ -3,6 +3,7 @@ import io
 import json
 import re
 import base64
+import fitz  # PyMuPDF
 import logging
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
@@ -550,6 +551,45 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ Não consegui analisar a imagem. Tenta de novo ou descreve por texto!")
 
 
+async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Processa PDF de bioimpedância enviado pelo usuário."""
+    user = update.effective_user
+    doc = update.message.document
+
+    if not doc or doc.mime_type != "application/pdf":
+        return
+
+    upsert_user(user.id, first_name=user.first_name or "", username=user.username or "")
+
+    if count_messages_last_hour(user.id) >= RATE_LIMIT_PER_HOUR:
+        await update.message.reply_text("⏳ Limite de mensagens atingido. Tenta daqui a pouco!")
+        return
+
+    await update.message.reply_text(
+        "📄 Recebi seu laudo de bioimpedância! Estou analisando..."
+    )
+
+    try:
+        file = await context.bot.get_file(doc.file_id)
+        pdf_bytes = await file.download_as_bytearray()
+
+        pdf = fitz.open(stream=bytes(pdf_bytes), filetype="pdf")
+        page = pdf[0]
+        pixmap = page.get_pixmap(dpi=150)
+        image_bytes = pixmap.tobytes("jpeg")
+        pdf.close()
+
+        image_b64 = base64.standard_b64encode(image_bytes).decode("utf-8")
+        await _process_bioimpedancia(update, context, image_b64=image_b64)
+
+    except Exception as e:
+        logger.error(f"Erro ao processar PDF de bioimpedância para user {user.id}: {e}")
+        await update.message.reply_text(
+            "⚠️ Não consegui processar o PDF. "
+            "Tente enviar uma foto do laudo ou digitar os dados manualmente."
+        )
+
+
 def main():
     init_db()       # garante que as tabelas de usuários existem
     init_taco_db()  # inicializa a base de dados nutricional TACO
@@ -561,6 +601,7 @@ def main():
     app.add_handler(CommandHandler("stats",  stats_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+    app.add_handler(MessageHandler(filters.Document.PDF, handle_document))
     logger.info("NUUtri bot iniciado com SQLite + base TACO!")
     app.run_polling()
 
