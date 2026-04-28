@@ -170,6 +170,110 @@ def _build_system_with_profile(profile: dict, taco_context: str = "", bioimpedan
     return system
 
 
+_PROMPT_EXTRAI_BIO = """Analise este laudo de bioimpedância e extraia TODOS os dados presentes.
+Responda APENAS com um JSON válido, sem texto antes ou depois, no seguinte formato:
+{
+  "gordura_pct": número ou null,
+  "massa_magra_kg": número ou null,
+  "massa_gorda_kg": número ou null,
+  "agua_corporal_pct": número ou null,
+  "gordura_visceral": número ou null,
+  "tmb_medida": número ou null,
+  "idade_metabolica": número ou null,
+  "outros": {}
+}
+Use null para campos não encontrados no laudo.
+Em "outros", inclua como chaves descritivas (snake_case) qualquer dado adicional não coberto pelos campos padrão.
+Converta todos os valores para número (float ou int), sem unidades na string."""
+
+
+def _formatar_confirmacao_bio(data: dict) -> str:
+    """Formata mensagem de confirmação dos dados extraídos."""
+    linhas = ["📊 *Dados de Bioimpedância Extraídos*\n"]
+    campos = [
+        ("gordura_pct",       "Gordura corporal",  "%"),
+        ("massa_magra_kg",    "Massa magra",       " kg"),
+        ("massa_gorda_kg",    "Massa gorda",       " kg"),
+        ("agua_corporal_pct", "Água corporal",     "%"),
+        ("gordura_visceral",  "Gordura visceral",  " (nível)"),
+        ("tmb_medida",        "TMB medida",        " kcal"),
+        ("idade_metabolica",  "Idade metabólica",  " anos"),
+    ]
+    for campo, label, unidade in campos:
+        val = data.get(campo)
+        if val is not None:
+            linhas.append(f"• {label}: {val}{unidade}")
+    outros = data.get("outros", {})
+    for k, v in outros.items():
+        linhas.append(f"• {k.replace('_', ' ').title()}: {v}")
+    linhas.append(
+        "\n_Quer gerar seu plano nutricional agora usando esses dados?_\n"
+        "Responda *sim* ou *não*."
+    )
+    return "\n".join(linhas)
+
+
+async def _process_bioimpedancia(
+    update, context, image_b64: str = None, text: str = None
+):
+    """Extrai dados de bioimpedância (via imagem ou texto), salva e confirma com o usuário."""
+    user = update.effective_user
+    await context.bot.send_chat_action(
+        chat_id=update.effective_chat.id, action="typing"
+    )
+
+    if image_b64:
+        message_content = [
+            {
+                "type": "image",
+                "source": {"type": "base64", "media_type": "image/jpeg", "data": image_b64},
+            },
+            {"type": "text", "text": _PROMPT_EXTRAI_BIO},
+        ]
+    else:
+        message_content = [
+            {
+                "type": "text",
+                "text": f"{_PROMPT_EXTRAI_BIO}\n\nTexto do usuário:\n{text}",
+            }
+        ]
+
+    try:
+        response = client.messages.create(
+            model=MODEL_OPUS,
+            max_tokens=512,
+            messages=[{"role": "user", "content": message_content}],
+            timeout=60.0,
+        )
+        raw = response.content[0].text.strip()
+
+        # Remove code fences caso Claude as adicione
+        if raw.startswith("```"):
+            raw = re.sub(r'^```(?:json)?\n?', '', raw)
+            raw = re.sub(r'\n?```$', '', raw.strip())
+
+        bio_data = json.loads(raw)
+        # Remove campos nulos para não poluir o perfil
+        bio_data = {k: v for k, v in bio_data.items() if v is not None or k == "outros"}
+        if "outros" not in bio_data:
+            bio_data["outros"] = {}
+
+        save_bioimpedancia(user.id, bio_data)
+        context.user_data["aguardando_confirmacao_bio"] = True
+
+        confirmacao = _formatar_confirmacao_bio(bio_data)
+        await update.message.reply_text(confirmacao, parse_mode="Markdown")
+
+    except (json.JSONDecodeError, IndexError, anthropic.APIError) as e:
+        logger.error(f"Erro ao extrair bioimpedância para user {user.id}: {e}")
+        await update.message.reply_text(
+            "⚠️ Não consegui extrair os dados da bioimpedância. "
+            "Tente digitar os dados manualmente, por exemplo:\n"
+            "_\"Gordura 22%, massa magra 58kg, TMB 1820 kcal\"_",
+            parse_mode="Markdown",
+        )
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     upsert_user(user.id, first_name=user.first_name or "", username=user.username or "")
