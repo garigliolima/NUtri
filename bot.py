@@ -89,6 +89,20 @@ _FOOD_KEYWORDS = [
     "chocolate", "mel", "açúcar", "pipoca", "cuscuz",
 ]
 
+_BIO_KEYWORDS = [
+    "bioimpedância", "bioimpedancia", "% gordura", "% de gordura",
+    "massa magra", "massa gorda", "gordura corporal", "gordura visceral",
+    "água corporal", "agua corporal", "tmb medida", "tmb:", "tmb :",
+    "idade metabólica", "idade metabolica", "inbody", "tanita", "omron",
+    "composição corporal", "composicao corporal",
+]
+
+
+def _detectar_bioimpedancia(text: str) -> bool:
+    """Retorna True se o texto contém dados ou menção a bioimpedância."""
+    texto_lower = text.lower()
+    return any(kw in texto_lower for kw in _BIO_KEYWORDS)
+
 
 async def _safe_reply(message, text: str):
     """Envia resposta com Markdown; faz fallback para texto puro se o parse falhar."""
