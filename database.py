@@ -64,6 +64,11 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_messages_user
                 ON messages(telegram_id, created_at);
         """)
+        # Migration: adiciona coluna bioimpedancia se não existir
+        try:
+            con.execute("ALTER TABLE users ADD COLUMN bioimpedancia TEXT")
+        except Exception:
+            pass  # coluna já existe
     logger.info(f"Banco de dados inicializado: {DB_PATH}")
 
 
@@ -105,6 +110,26 @@ def get_profile(telegram_id: int) -> dict:
             "SELECT * FROM users WHERE telegram_id = ?", (telegram_id,)
         ).fetchone()
         return dict(row) if row else {}
+
+
+def save_bioimpedancia(telegram_id: int, data: dict) -> None:
+    """Persiste dados de bioimpedância no perfil do usuário."""
+    with _conn() as con:
+        con.execute(
+            "UPDATE users SET bioimpedancia = ?, updated_at = datetime('now') WHERE telegram_id = ?",
+            (json.dumps(data, ensure_ascii=False), telegram_id),
+        )
+
+
+def get_bioimpedancia(telegram_id: int) -> dict:
+    """Retorna dados de bioimpedância salvos ou {} se ausente."""
+    with _conn() as con:
+        row = con.execute(
+            "SELECT bioimpedancia FROM users WHERE telegram_id = ?", (telegram_id,)
+        ).fetchone()
+    if row and row["bioimpedancia"]:
+        return json.loads(row["bioimpedancia"])
+    return {}
 
 
 # ── Histórico de mensagens ─────────────────────────────────────────────────────
