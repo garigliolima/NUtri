@@ -67,7 +67,7 @@ def init_db():
         # Migration: adiciona coluna bioimpedancia se não existir
         try:
             con.execute("ALTER TABLE users ADD COLUMN bioimpedancia TEXT")
-        except Exception:
+        except sqlite3.OperationalError:
             pass  # coluna já existe
     logger.info(f"Banco de dados inicializado: {DB_PATH}")
 
