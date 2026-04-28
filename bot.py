@@ -106,6 +106,13 @@ def _detectar_bioimpedancia(text: str) -> bool:
     return any(kw in texto_lower for kw in _BIO_KEYWORDS)
 
 
+_AFIRMATIVOS = {"sim", "s", "yes", "quero", "pode", "vai", "gera", "ok", "claro", "bora", "vamos"}
+
+def _is_affirmative(text: str) -> bool:
+    """Retorna True se o texto é uma resposta afirmativa comum."""
+    return text.strip().lower() in _AFIRMATIVOS
+
+
 async def _safe_reply(message, text: str):
     """Envia resposta com Markdown; faz fallback para texto puro se o parse falhar."""
     try:
@@ -515,7 +522,43 @@ async def _process_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await _process_text(update, context, update.message.text)
+    text = update.message.text or ""
+
+    # Fluxo de confirmação pós-bioimpedância
+    if context.user_data.get("aguardando_confirmacao_bio"):
+        context.user_data.pop("aguardando_confirmacao_bio")
+        if _is_affirmative(text):
+            user = update.effective_user
+            profile = get_profile(user.id)
+            tem_perfil = profile.get("nome") and profile.get("peso") and profile.get("objetivo")
+            if tem_perfil:
+                trigger = (
+                    "O usuário quer gerar um novo plano nutricional em PDF. "
+                    "Já tenho as informações dele no perfil, incluindo dados de bioimpedância. "
+                    "Gere o JSON do plano diretamente, usando a massa magra para calcular os macros. "
+                    "Use os valores da tabela TACO para os alimentos."
+                )
+            else:
+                trigger = (
+                    "Quero gerar meu plano nutricional personalizado em PDF. "
+                    "Tenho dados de bioimpedância salvos no meu perfil. "
+                    "Se ainda faltar alguma informação, me pergunte sobre: "
+                    "nome, peso, altura, idade, sexo, objetivo e nível de atividade física."
+                )
+            await _process_text(update, context, trigger, use_opus=True)
+        else:
+            await update.message.reply_text(
+                "Ok! Seus dados de bioimpedância foram salvos. 📊\n"
+                "Use /plano quando quiser gerar seu plano nutricional. 💪"
+            )
+        return
+
+    # Detecção de dados de bioimpedância em texto livre
+    if _detectar_bioimpedancia(text):
+        await _process_bioimpedancia(update, context, text=text)
+        return
+
+    await _process_text(update, context, text)
 
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):

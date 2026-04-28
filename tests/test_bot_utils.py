@@ -63,3 +63,20 @@ def test_build_system_sem_bioimpedancia():
     profile = {"nome": "Ana", "peso": "75kg"}
     result = _build_system_with_profile(profile)
     assert "BIOIMPEDÂNCIA" not in result
+
+
+def test_is_affirmative():
+    from bot import _is_affirmative
+    assert _is_affirmative("sim") is True
+    assert _is_affirmative("SIM") is True
+    assert _is_affirmative("s") is True
+    assert _is_affirmative("quero") is True
+    assert _is_affirmative("pode") is True
+    assert _is_affirmative("vai") is True
+    assert _is_affirmative("gera") is True
+    assert _is_affirmative("ok") is True
+    assert _is_affirmative("yes") is True
+    assert _is_affirmative("não") is False
+    assert _is_affirmative("nao") is False
+    assert _is_affirmative("n") is False
+    assert _is_affirmative("depois") is False
