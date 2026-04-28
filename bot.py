@@ -12,6 +12,7 @@ from database import (
     init_db, upsert_user, get_profile, get_history,
     save_message, clear_history, save_plan,
     count_messages_last_hour, get_stats,
+    save_bioimpedancia, get_bioimpedancia,
 )
 from taco_db import init_taco_db, buscar_alimento, gerar_contexto_nutricional, resumo_banco
 
@@ -125,18 +126,42 @@ def _extrair_termos_alimentos(texto: str) -> list[str]:
     return encontrados[:10]  # limita a 10 termos para não poluir o contexto
 
 
-def _build_system_with_profile(profile: dict, taco_context: str = "") -> str:
-    """Injeta o perfil do usuário e dados TACO no system prompt."""
+def _build_system_with_profile(profile: dict, taco_context: str = "", bioimpedancia: dict = None) -> str:
+    """Injeta o perfil do usuário, bioimpedância e dados TACO no system prompt."""
     system = SYSTEM_PROMPT
 
-    if any(profile.get(k) for k in ["nome","peso","altura","idade","objetivo"]):
+    if any(profile.get(k) for k in ["nome", "peso", "altura", "idade", "objetivo"]):
         lines = ["\n\nPERFIL DO USUÁRIO (já coletado anteriormente):"]
-        for k, label in [("nome","Nome"),("peso","Peso"),("altura","Altura"),
-                         ("idade","Idade"),("sexo","Sexo"),
-                         ("objetivo","Objetivo"),("nivel_atividade","Nível de atividade")]:
+        for k, label in [("nome", "Nome"), ("peso", "Peso"), ("altura", "Altura"),
+                         ("idade", "Idade"), ("sexo", "Sexo"),
+                         ("objetivo", "Objetivo"), ("nivel_atividade", "Nível de atividade")]:
             if profile.get(k):
                 lines.append(f"- {label}: {profile[k]}")
         lines.append("Use essas informações sem perguntar de novo, a menos que o usuário queira atualizar.")
+        system += "\n".join(lines)
+
+    if bioimpedancia:
+        lines = ["\n\nBIOIMPEDÂNCIA DO USUÁRIO (dados medidos por aparelho):"]
+        campos = [
+            ("gordura_pct",       "Gordura corporal",  "%"),
+            ("massa_magra_kg",    "Massa magra",       " kg"),
+            ("massa_gorda_kg",    "Massa gorda",       " kg"),
+            ("agua_corporal_pct", "Água corporal",     "%"),
+            ("gordura_visceral",  "Gordura visceral",  " (nível)"),
+            ("tmb_medida",        "TMB medida",        " kcal"),
+            ("idade_metabolica",  "Idade metabólica",  " anos"),
+        ]
+        for campo, label, unidade in campos:
+            val = bioimpedancia.get(campo)
+            if val is not None:
+                lines.append(f"- {label}: {val}{unidade}")
+        outros = bioimpedancia.get("outros", {})
+        for k, v in outros.items():
+            lines.append(f"- {k}: {v}")
+        lines.append(
+            "Use esses dados para calcular macros com base na massa magra real. "
+            "Prefira a TMB medida à TMB estimada por fórmulas."
+        )
         system += "\n".join(lines)
 
     if taco_context:
@@ -272,7 +297,8 @@ async def call_claude(user_id: int, message_content: list, profile: dict, taco_c
         "content": message_content,
     })
 
-    system = _build_system_with_profile(profile, taco_context)
+    bio = get_bioimpedancia(user_id)
+    system = _build_system_with_profile(profile, taco_context, bioimpedancia=bio or None)
     model = MODEL_OPUS if use_opus else MODEL_HAIKU
     logger.info(f"Chamando Claude com modelo: {model}")
 
