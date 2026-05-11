@@ -469,57 +469,55 @@ async def _process_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text
         if '"GERAR_PDF"' in reply:
             stripped = reply.strip()
 
-            # Extrai JSON de dentro de code fences em qualquer posição da resposta
-            # (Claude às vezes retorna texto + ```json {...} ```)
-            code_fence_match = re.search(r'```(?:json)?\s*\n?(\{.*\})\s*\n?```', stripped, re.DOTALL)
-            if code_fence_match:
-                json_candidate = code_fence_match.group(1).strip()
-            else:
-                # Fallback: remove code fences no início/fim
-                if stripped.startswith("```"):
-                    stripped = re.sub(r'^```(?:json)?\n?', '', stripped)
-                    stripped = re.sub(r'\n?```$', '', stripped.strip())
-                json_start = stripped.find("{")
-                json_candidate = stripped[json_start:] if json_start != -1 else None
+            # Estratégia 1: JSON dentro de code fence (```json ... ```)
+            code_fence_match = re.search(r'```(?:json)?\s*\n?(\{.*?\})\s*\n?```', stripped, re.DOTALL)
 
+            plan_data = None
             try:
-                plan_data = json.loads(json_candidate) if json_candidate else None
-                if plan_data and plan_data.get("GERAR_PDF"):
-                    semanal = context.user_data.pop("plano_semanal", False)
-                    tipo = "semanal" if semanal else "diário"
-                    await update.message.reply_text(f"📄 Gerando seu plano NUUtri {tipo} personalizado...")
-                    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_document")
-
-                    pdf_bytes = (
-                        generate_weekly_nutrition_pdf(plan_data)
-                        if semanal
-                        else generate_nutrition_pdf(plan_data)
-                    )
-                    save_plan(user.id, plan_data)
-
-                    nome = plan_data.get("user_name", "usuario").replace(" ", "_")
-                    sufixo = "_semanal" if semanal else ""
-                    await context.bot.send_document(
-                        chat_id=update.effective_chat.id,
-                        document=io.BytesIO(pdf_bytes),
-                        filename=f"plano_nuutri_{nome}{sufixo}.pdf",
-                        caption=(
-                            f"✅ *Seu plano NUUtri está pronto!*\n\n"
-                            f"🎯 Objetivo: {plan_data.get('objetivo', '')}\n"
-                            f"🔥 {plan_data.get('calorias', '')} kcal/dia • "
-                            f"💪 {plan_data.get('proteinas', '')}g prot • "
-                            f"🍞 {plan_data.get('carbs', '')}g carb • "
-                            f"🥑 {plan_data.get('gorduras', '')}g gord\n\n"
-                            "_📊 Valores baseados na Tabela TACO (Unicamp)_\n"
-                            "_Qualquer dúvida, é só perguntar!_"
-                        ),
-                        parse_mode="Markdown"
-                    )
-                    return
-            except json.JSONDecodeError as e:
+                if code_fence_match:
+                    plan_data = json.loads(code_fence_match.group(1).strip())
+                else:
+                    # Estratégia 2: raw_decode — para no } final, ignora texto antes/depois
+                    json_start = stripped.find("{")
+                    if json_start != -1:
+                        plan_data, _ = json.JSONDecoder().raw_decode(stripped, json_start)
+            except (json.JSONDecodeError, ValueError) as e:
                 logger.error(f"Erro ao parsear JSON do plano para user {user.id}: {e}\nResposta: {reply[:300]}")
                 await update.message.reply_text(
                     "⚠️ Houve um problema ao gerar seu plano. Por favor, tente novamente digitando /plano."
+                )
+                return
+
+            if plan_data and plan_data.get("GERAR_PDF"):
+                semanal = context.user_data.pop("plano_semanal", False)
+                tipo = "semanal" if semanal else "diário"
+                await update.message.reply_text(f"📄 Gerando seu plano NUUtri {tipo} personalizado...")
+                await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_document")
+
+                pdf_bytes = (
+                    generate_weekly_nutrition_pdf(plan_data)
+                    if semanal
+                    else generate_nutrition_pdf(plan_data)
+                )
+                save_plan(user.id, plan_data)
+
+                nome = plan_data.get("user_name", "usuario").replace(" ", "_")
+                sufixo = "_semanal" if semanal else ""
+                await context.bot.send_document(
+                    chat_id=update.effective_chat.id,
+                    document=io.BytesIO(pdf_bytes),
+                    filename=f"plano_nuutri_{nome}{sufixo}.pdf",
+                    caption=(
+                        f"✅ *Seu plano NUUtri está pronto!*\n\n"
+                        f"🎯 Objetivo: {plan_data.get('objetivo', '')}\n"
+                        f"🔥 {plan_data.get('calorias', '')} kcal/dia • "
+                        f"💪 {plan_data.get('proteinas', '')}g prot • "
+                        f"🍞 {plan_data.get('carbs', '')}g carb • "
+                        f"🥑 {plan_data.get('gorduras', '')}g gord\n\n"
+                        "_📊 Valores baseados na Tabela TACO (Unicamp)_\n"
+                        "_Qualquer dúvida, é só perguntar!_"
+                    ),
+                    parse_mode="Markdown"
                 )
                 return
 
