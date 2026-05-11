@@ -466,15 +466,23 @@ async def _process_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text
 
         # Detecta JSON de plano nutricional
         if '"GERAR_PDF"' in reply:
-            # Remove code fences que o Claude pode adicionar (```json ... ```)
             stripped = reply.strip()
-            if stripped.startswith("```"):
-                stripped = re.sub(r'^```(?:json)?\n?', '', stripped)
-                stripped = re.sub(r'\n?```$', '', stripped.strip())
 
-            json_start = stripped.find("{")
+            # Extrai JSON de dentro de code fences em qualquer posição da resposta
+            # (Claude às vezes retorna texto + ```json {...} ```)
+            code_fence_match = re.search(r'```(?:json)?\s*\n?(\{.*\})\s*\n?```', stripped, re.DOTALL)
+            if code_fence_match:
+                json_candidate = code_fence_match.group(1).strip()
+            else:
+                # Fallback: remove code fences no início/fim
+                if stripped.startswith("```"):
+                    stripped = re.sub(r'^```(?:json)?\n?', '', stripped)
+                    stripped = re.sub(r'\n?```$', '', stripped.strip())
+                json_start = stripped.find("{")
+                json_candidate = stripped[json_start:] if json_start != -1 else None
+
             try:
-                plan_data = json.loads(stripped[json_start:]) if json_start != -1 else None
+                plan_data = json.loads(json_candidate) if json_candidate else None
                 if plan_data and plan_data.get("GERAR_PDF"):
                     semanal = context.user_data.pop("plano_semanal", False)
                     tipo = "semanal" if semanal else "diário"
