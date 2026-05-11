@@ -414,9 +414,10 @@ async def call_claude(user_id: int, message_content: list, profile: dict, taco_c
     model = MODEL_OPUS if use_opus else MODEL_HAIKU
     logger.info(f"Chamando Claude com modelo: {model}")
 
+    # Planos nutricionais em JSON podem ter 3000+ tokens; 4096 cobre diário e semanal
     response = client.messages.create(
         model=model,
-        max_tokens=2048,
+        max_tokens=4096,
         system=system,
         messages=history,
         timeout=60.0,
